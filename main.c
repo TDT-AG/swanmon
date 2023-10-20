@@ -98,13 +98,21 @@ static void usage()
 
 int main(int argc, const char *argv[])
 {
+	const char *command_name;
+	const struct command *command;
+
 	if (argc < 2) {
 		usage();
 		return 1;
 	}
 
-	int ret;
-	const struct command *command = find_command(argv[1]);
+	command_name = argv[1];
+	if (strcmp(help_command.name, command_name) == 0) {
+		usage();
+		return 0;
+	}
+
+	command = find_command(command_name);
 	if (!command) {
 		usage();
 		return 1;
