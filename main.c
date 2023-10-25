@@ -34,7 +34,7 @@ static const struct command commands[] = {
 	{"get-pools", NULL, "List the currently loaded pools"},
 	{"get-algorithms", NULL, "List currently loaded algorithms and their implementation"},
 	{"get-counters", NULL, "List global or connection-specific counters for several IKE events"},
-	{NULL, NULL}
+	{NULL, NULL, NULL}
 };
 
 static int get_max_command_length()
