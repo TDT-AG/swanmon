@@ -11,9 +11,8 @@
 #include <string.h>
 #include <stdlib.h>
 
-#include <glib.h>
-
 #include "format.h"
+#include "json-stack.h"
 
 json_object *format_generate_response(bool is_event)
 {
@@ -78,7 +77,7 @@ void format_add_data(json_object *root, json_object *data)
 
 json_object *format_parse_davici_response(struct davici_response *res)
 {
-	GQueue* queue = g_queue_new();
+	json_stack *stack = json_stack_new();
 	json_object *root = json_object_new_object();
 	json_object *current;
 	json_object *next;
@@ -86,58 +85,65 @@ json_object *format_parse_davici_response(struct davici_response *res)
 	char buf[4096];
 	int ret;
 
-	g_queue_push_head(queue, root);
+	json_stack_push(stack, root);
 
 	while (true) {
 		ret = davici_parse(res);
 		switch (ret) {
 			case DAVICI_END:
-				g_queue_free(queue);
-				return root;
+				goto cleanup;
 			case DAVICI_SECTION_START:
-				current = g_queue_peek_head(queue);
+				current = json_stack_peek(stack);
+				if (current == 0) 
+					goto cleanup;
 				next = json_object_new_object();
 				name = davici_get_name(res);
 				json_object_object_add(current, name, next);
-				g_queue_push_head(queue, next);
+				json_stack_push(stack, next);
 				break;
 			case DAVICI_SECTION_END:
-				g_queue_pop_head(queue);
+				json_stack_pop(stack);
 				break;
 			case DAVICI_KEY_VALUE:
 				ret = davici_get_value_str(res, buf, sizeof(buf));
-				if (ret < 0) {
-					g_queue_free(queue);
-					return root;
-				}
+				if (ret < 0)
+					goto cleanup;
 
 				name = davici_get_name(res);
-				current = g_queue_peek_head(queue);
+				current = json_stack_peek(stack);
+				if (current == 0) 
+					goto cleanup;
 				json_object_object_add(current, name, json_object_new_string(buf));
 				break;
 			case DAVICI_LIST_START:
-				current = g_queue_peek_head(queue);
+				current = json_stack_peek(stack);
+				if (current == 0) 
+					goto cleanup;
 				next = json_object_new_array();
 				name = davici_get_name(res);
 				json_object_object_add(current, name, next);
-				g_queue_push_head(queue, next);
+				json_stack_push(stack, next);
 				break;
 			case DAVICI_LIST_ITEM:
 				ret = davici_get_value_str(res, buf, sizeof(buf));
 				if (ret < 0) {
-					g_queue_free(queue);
-					return root;
+					goto cleanup;
 				}
 
-				current = g_queue_peek_head(queue);
+				current = json_stack_peek(stack);
+				if (current == 0) 
+					goto cleanup;
 				json_object_array_add(current, json_object_new_string(buf));
 				break;
 			case DAVICI_LIST_END:
-				g_queue_pop_head(queue);
+				json_stack_pop(stack);
 				break;
 			default:
-				g_queue_free(queue);
-				return root;
+				goto cleanup;
 		}
 	}
+
+cleanup:
+	json_stack_free(stack);
+	return root;
 }
