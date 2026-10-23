@@ -9,6 +9,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <locale.h>
 
 #include "query.h"
 
@@ -16,7 +17,7 @@ struct command {
 	const char *name;
 	const char *event_name;
 	const char *description;
-} command;
+};
 
 static const struct command help_command = {"help", NULL, "Shows swanmon help"};
 static const struct command commands[] = {
@@ -100,6 +101,9 @@ int main(int argc, const char *argv[])
 {
 	const char *command_name;
 	const struct command *command;
+
+	/* required for is_text() UTF-8 decoding */
+	setlocale(LC_CTYPE, "C.UTF-8");
 
 	if (argc < 2) {
 		usage();

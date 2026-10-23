@@ -17,6 +17,8 @@
 #include "query.h"
 #include "format.h"
 
+#define DISPATCH_TIMEOUT_MS 10000
+
 struct dispatch_data {
 	struct pollfd pfd;
 	struct davici_conn *c;
@@ -24,6 +26,14 @@ struct dispatch_data {
 	json_object *response;
 	int pending;
 };
+
+static bool has_errors(json_object *response)
+{
+	json_object *errors;
+
+	return json_object_object_get_ex(response, ERRORS_KEY, &errors) &&
+		json_object_array_length(errors) > 0;
+}
 
 static int fd_cb(struct davici_conn *conn, int fd, int ops, void *user)
 {
@@ -54,8 +64,14 @@ static void command_cb(struct davici_conn *conn, int err, const char *name,
 	if (err < 0) {
 		json_object *error = format_parse_error(name, -err);
 		format_add_error(dd->response, error);
-	} else if (res && !dd->is_event) {
-		json_object *data = format_parse_davici_response(res);
+	} else if (res && !dd->is_event && !has_errors(dd->response)) {
+		json_object *data;
+
+		err = format_parse_davici_response(res, &data);
+		if (err < 0) {
+			format_add_error(dd->response, format_parse_error(name, -err));
+			return;
+		}
 		format_set_data(dd->response, data);
 	}
 }
@@ -68,8 +84,14 @@ static void stream_cb(struct davici_conn *conn, int err, const char *name,
 	if (err < 0) {
 		json_object *error = format_parse_error(name, -err);
 		format_add_error(dd->response, error);
-	} else if (res) {
-		json_object *obj = format_parse_davici_response(res);
+	} else if (res && !has_errors(dd->response)) {
+		json_object *obj;
+
+		err = format_parse_davici_response(res, &obj);
+		if (err < 0) {
+			format_add_error(dd->response, format_parse_error(name, -err));
+			return;
+		}
 		format_add_data(dd->response, obj);
 	}
 }
@@ -102,14 +124,22 @@ static int dispatch(struct dispatch_data *dd)
 {
 	int err, ret;
 
-	while (dd->pending && dd->pfd.fd != -1) {
-		ret = poll(&dd->pfd, 1, -1);
-		if (ret < 0)
-			return -errno;
-		if (ret != 1)
-			return -EIO;
+	while (dd->pending) {
+		if (dd->pfd.fd == -1)
+			return -ECONNRESET;
 
-		if (dd->pfd.revents & POLLIN) {
+		ret = poll(&dd->pfd, 1, DISPATCH_TIMEOUT_MS);
+		if (ret < 0) {
+			if (errno == EINTR)
+				continue;
+			return -errno;
+		}
+		if (ret == 0)
+			return -ETIMEDOUT;
+
+		if (dd->pfd.revents & POLLNVAL)
+			return -EBADF;
+		if (dd->pfd.revents & (POLLIN | POLLHUP | POLLERR)) {
 			err = davici_read(dd->c);
 			if (err < 0)
 				return err;
@@ -143,7 +173,7 @@ int query_command(const char *command, const char *event)
 		json_object *error = format_parse_error(
 			"Connecting failed", -err);
 		format_add_error(dd.response, error);
-		ret = -err;
+		ret = 1;
 		goto out;
 	}
 
@@ -152,7 +182,7 @@ int query_command(const char *command, const char *event)
 		json_object *error = format_parse_error(
 			"Executing failed", -err);
 		format_add_error(dd.response, error);
-		ret = -err;
+		ret = 1;
 		goto out;
 	}
 
@@ -161,14 +191,16 @@ int query_command(const char *command, const char *event)
 		json_object *error = format_parse_error(
 			"Dispatching failed", -err);
 		format_add_error(dd.response, error);
-		ret = -err;
+		ret = 1;
 		goto out;
 	}
 
-	davici_disconnect(dd.c);
-
 	out:
+		if (dd.c)
+			davici_disconnect(dd.c);
 		format_dump_json(dd.response, stdout);
+		if (has_errors(dd.response))
+			ret = 1;
 		json_object_put(dd.response);
 
 		return ret;

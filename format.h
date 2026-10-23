@@ -25,6 +25,6 @@ void format_dump_json(json_object *obj, FILE *out);
 void format_add_error(json_object *root, json_object *error);
 void format_set_data(json_object *root, json_object *data);
 void format_add_data(json_object *root, json_object *data);
-json_object *format_parse_davici_response(struct davici_response *res);
+int format_parse_davici_response(struct davici_response *res, json_object **out);
 
 #endif
