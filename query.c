@@ -102,7 +102,11 @@ static int dispatch(struct dispatch_data *dd)
 {
 	int err, ret;
 
-	while (dd->pending && dd->pfd.fd != -1) {
+	/* A streamed command also queues an event unregistration that is
+	 * answered after the command; leaving before that answer makes charon
+	 * write to a closed socket.
+	 */
+	while ((dd->pending || davici_queue_len(dd->c)) && dd->pfd.fd != -1) {
 		ret = poll(&dd->pfd, 1, -1);
 		if (ret < 0)
 			return -errno;
